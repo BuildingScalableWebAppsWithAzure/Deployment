@@ -1,0 +1,23 @@
+﻿@model IEnumerable<Deployment.Persistence.ReceivedMessage>
+
+@{
+    ViewBag.Title = "Messages";
+}
+
+<h2>Messages</h2>
+
+<table class="table">
+    <tr>
+        <th>
+            Messages
+        </th>
+    </tr>
+
+@foreach (var item in Model) {
+    <tr>
+        <td>
+            @Html.DisplayFor(modelItem => item.Message)
+        </td>
+    </tr>
+}
+</table>

@@ -1,0 +1,242 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "staging",
+      "metadata": {
+        "description": "The environment type. This will typically be 'staging' or 'production'"
+      }
+    },
+    "sqlServerAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "The administrative password for the SQL Server"
+      }
+    }
+  },
+  "variables": {
+    "sqlserver": {
+      "adminLogin": "adminuser",
+      "deploymentName": "[concat('sqlserver-deployment-', parameters('environmentName'), '-', uniqueString(resourceGroup().id))]"
+    },
+    "sqldb": {
+      "deploymentName": "[concat('sqldb-deployment-', parameters('environmentName'))]",
+      "edition": "Basic",
+      "serviceObjective": "Basic",
+      "collation": "SQL_Latin1_General_CP1_CI_AS"
+    },
+    "storageAccount": {
+      "deploymentName": "[concat('sadeployment', parameters('environmentName'))]",
+      "deploymentType": "Standard_LRS"
+    },
+    "serviceBus": {
+      "namespace": "[concat('sb-deployment-', parameters('environmentName'), '-', uniqueString(resourceGroup().id))]"
+    },
+    "serviceBusQueue": {
+      "name": "[concat(variables('serviceBus').namespace, '/messages')]"
+    },
+    "serviceBusAuthRule": {
+      "listenSendAccessKeyName": "[concat(variables('serviceBus').namespace, '/ListenSend')]"
+    },
+    "appServicePlan": {
+      "deploymentName": "[concat('asp-deployment-', parameters('environmentName'))]",
+      "sku": "F1"
+    },
+    "webApp": {
+      "deploymentName": "[concat('wa-deployment-', parameters('environmentName'), '-', uniqueString(resourceGroup().id))]"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ServiceBus/namespaces",
+      "sku": {
+        "name": "Basic",
+        "tier": "Basic"
+      },
+      "kind": "Messaging",
+      "name": "[variables('serviceBus').nameSpace]",
+      "apiVersion": "2015-08-01",
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "displayName": "sb-deployment"
+      },
+      "properties": {
+        "serviceBusEndpoint": "[concat('https://', variables('serviceBus').nameSpace,'.servicebus.windows.net:443/')]"
+      },
+      "dependsOn": []
+    },
+    {
+      "type": "Microsoft.ServiceBus/namespaces/AuthorizationRules",
+      "name": "[variables('serviceBusAuthRule').listenSendAccessKeyName]",
+      "apiVersion": "2015-08-01",
+      "properties": {
+        "rights": [
+          "Listen",
+          "Send", 
+          "Manage"
+        ]
+      },
+      "tags": {
+        "displayName": "sb-deployment: sendListen"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ServiceBus/namespaces', variables('serviceBus').namespace)]"
+      ]
+    },
+    {
+      "type": "Microsoft.ServiceBus/namespaces/queues",
+      "name": "[variables('serviceBusQueue').name]",
+      "apiVersion": "2015-08-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "defaultMessageTimeToLive": "14.00:00:00"
+      },
+      "tags": {
+        "displayName": "sb-deployment: queue"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ServiceBus/namespaces', variables('serviceBus').namespace)]"
+      ]
+    },
+    {
+      "name": "[variables('sqlserver').deploymentName]",
+      "type": "Microsoft.Sql/servers",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2014-04-01-preview",
+      "dependsOn": [],
+      "tags": {
+        "displayName": "sqlserver-deployment"
+      },
+      "properties": {
+        "administratorLogin": "[variables('sqlServer').adminLogin]",
+        "administratorLoginPassword": "[parameters('sqlServerAdminPassword')]"
+      },
+      "resources": [
+        {
+          "name": "AllowAllWindowsAzureIps",
+          "type": "firewallrules",
+          "location": "[resourceGroup().location]",
+          "apiVersion": "2014-04-01-preview",
+          "dependsOn": [
+            "[resourceId('Microsoft.Sql/servers', variables('sqlserver').deploymentName)]"
+          ],
+          "properties": {
+            "startIpAddress": "0.0.0.0",
+            "endIpAddress": "0.0.0.0"
+          }
+        },
+        {
+          "name": "[variables('sqldb').deploymentName]",
+          "type": "databases",
+          "location": "[resourceGroup().location]",
+          "apiVersion": "2014-04-01-preview",
+          "dependsOn": [
+            "[resourceId('Microsoft.Sql/servers', variables('sqlserver').deploymentName)]"
+          ],
+          "tags": {
+            "displayName": "sqldb-deployment"
+          },
+          "properties": {
+            "collation": "[variables('sqldb').collation]",
+            "edition": "[variables('sqldb').edition]",
+            "maxSizeBytes": "1073741824",
+            "requestedServiceObjectiveName": "[variables('sqldb').serviceObjective]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "[variables('storageAccount').deploymentName]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-01-01",
+      "sku": {
+        "name": "[variables('storageAccount').deploymentType]"
+      },
+      "dependsOn": [],
+      "tags": {
+        "displayName": "sadeployment"
+      },
+      "kind": "Storage"
+    },
+    {
+      "name": "[variables('appServicePlan').deploymentName]",
+      "type": "Microsoft.Web/serverfarms",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-08-01",
+      "sku": {
+        "name": "[variables('appServicePlan').sku]"
+      },
+      "dependsOn": [],
+      "tags": {
+        "displayName": "asp-deployment"
+      },
+      "properties": {
+        "name": "[variables('appServicePlan').deploymentName]",
+        "numberOfWorkers": 1
+      }
+    },
+    {
+      "name": "[variables('webApp').deploymentName]",
+      "type": "Microsoft.Web/sites",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-08-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlan').deploymentName)]"
+      ],
+      "tags": {
+        "[concat('hidden-related:', resourceId('Microsoft.Web/serverfarms', variables('appServicePlan').deploymentName))]": "Resource",
+        "displayName": "wa-deployment"
+      },
+      "properties": {
+        "name": "[variables('webApp').deploymentName]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlan').deploymentName)]",
+        "siteConfig": {
+          "connectionStrings": [
+            {
+              "name": "DeploymentContext",
+              "connectionString": "[concat('Server=tcp:', variables('sqlServer').deploymentName, '.database.windows.net,1433;Initial Catalog=', variables('sqldb').deploymentName, ';Persist Security Info=False;User ID=', variables('sqlServer').adminLogin, ';Password=', parameters('sqlServerAdminPassword'), ';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;')]",
+              "type": 2
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "name": "appsettings",
+          "type": "config",
+          "apiVersion": "2015-08-01",
+          "dependsOn": [
+            "[resourceId('Microsoft.Web/sites', variables('webApp').deploymentName)]",
+            "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccount').deploymentName)]"
+          ],
+          "tags": {
+            "displayName": "appSettings"
+          },
+          "properties": {
+            "ServiceBusConnectionString": "[listKeys('ListenSend','2015-08-01').primaryConnectionString]",
+            "AzureWebJobsDashboard": "[Concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccount').deploymentName,';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccount').deploymentName), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value)]",
+            "AzureWebJobsStorage": "[Concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccount').deploymentName,';AccountKey=',listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccount').deploymentName), providers('Microsoft.Storage', 'storageAccounts').apiVersions[0]).keys[0].value)]"
+          }
+        }
+      ]
+    }
+  ],
+  "outputs": {
+    "appServiceName": {
+      "type": "string",
+      "value": "[variables('webApp').deploymentName]"
+    },
+    "sqlServerName": {
+      "type": "string",
+      "value": "[concat(variables('sqlserver').deploymentName, '.database.windows.net')]"
+    },
+    "sqlDatabaseName": {
+      "type": "string", 
+      "value": "[variables('sqldb').deploymentName]"
+    }
+  }
+}
